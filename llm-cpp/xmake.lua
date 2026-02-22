@@ -87,7 +87,7 @@ add_requires("spdlog", {optional = true}) -- Fast logging library
 -- Main Library Target
 -- ============================================================================
 -- The library contains the core LLM implementation components:
--- - dataloader.hpp/cpp: GPT dataset and data loading (from ch02)
+-- - dataloader.h/cpp: GPT dataset and data loading (from ch02)
 -- - Tokenization support via cpp-tiktoken
 -- - Tensor operations via libtorch
 target("llm-core")
@@ -97,7 +97,7 @@ target("llm-core")
     add_includedirs("include", {public = true})
 
     -- Source files
-    add_files("src/*.cpp", "src/**/*.cpp")
+    add_files("src/*.cpp")
 
     -- Private headers
     add_includedirs("src", {public = false})
@@ -106,8 +106,8 @@ target("llm-core")
     add_packages("libtorch")
 
     -- Uncomment for cpp-tiktoken (after manual installation):
-    -- add_includedirs("thirdparty/cpp-tiktoken/include", {public = true})
-    -- add_links("tiktoken")
+    add_includedirs("thirdparty/cpp-tiktoken/include", {public = true})
+    add_links("tiktoken")
 
     -- Export definitions for shared library builds
     add_defines("LLM_EXPORTS", {public = true})
@@ -123,7 +123,6 @@ target_end()
 -- ============================================================================
 target("llm-cli")
     set_kind("binary")
-    add_files("src/main.cpp")
     add_deps("llm-core")
     add_packages("libtorch")
 
@@ -152,39 +151,3 @@ target("tests")
 
     add_defines("LLM_TEST_MODE")
 target_end()
-
--- ============================================================================
--- Example: Loading text and creating a dataloader
--- ============================================================================
--- Usage example (in your main.cpp):
---
--- #include "llm/dataloader.hpp"
---
--- int main() {
---     // Load text file
---     auto text = llm::load_text_file("the-verdict.txt");
---
---     // Create tokenizer
---     auto tokenizer = llm::TikTokenTokenizer::gpt2();
---
---     // Create dataloader with GPT-2 style settings
---     llm::DataLoaderConfig config{
---         .batch_size = 8,
---         .max_length = 256,
---         .stride = 128,
---         .shuffle = true,
---         .drop_last = true
---     };
---
---     auto dataloader = llm::create_dataloader(text, config, tokenizer);
---
---     // Iterate over batches
---     for (auto& batch : *dataloader) {
---         auto inputs = batch.data;    // [batch_size, max_length]
---         auto targets = batch.target; // [batch_size, max_length]
---         // ... training code ...
---     }
---
---     return 0;
--- }
--- ============================================================================

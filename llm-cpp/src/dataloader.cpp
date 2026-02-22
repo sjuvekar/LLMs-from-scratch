@@ -6,7 +6,7 @@
  * ported from Python's GPTDatasetV1 and create_dataloader_v1.
  */
 
-#include "llm-cpp/dataloader.h"
+#include "dataloader.h"
 #include "tiktoken/encoding.h"
 
 #include <algorithm>
