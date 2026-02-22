@@ -9,6 +9,10 @@
 -- - Fast builds without separate generation step
 -- - Simple Lua syntax vs CMake's custom DSL
 -- - Cross-platform support (Linux/Windows/macOS/mobile/Wasm)
+--
+-- Dependencies:
+-- - libtorch: PyTorch C++ API for tensor operations
+-- - cpp-tiktoken: BPE tokenizer for GPT-2/GPT-4 (manual install required)
 -- ============================================================================
 
 -- Project metadata
@@ -29,147 +33,158 @@ set_languages("c++26")
 -- ============================================================================
 -- Build Modes
 -- ============================================================================
--- Debug: Full debug symbols, no optimization, all assertions enabled
--- Release: Full optimization, no debug symbols, assertions disabled
--- ReleaseWithDebug: Optimization with debug symbols (for profiling)
 add_rules("mode.debug", "mode.release", "mode.releasedbg")
 
 -- ============================================================================
 -- Compiler-Specific Warning Flags
 -- ============================================================================
 -- High warning levels catch bugs early and enforce code quality.
--- We use the strictest settings to ensure portable, correct code.
 
--- Clang/GCC warnings (Linux, macOS with Clang)
+-- Clang/GCC warnings (Linux, macOS)
 if is_plat("linux", "macosx") then
-    -- -Wall: Enable common warnings (enabled by default in XMake)
-    -- -Wextra: Enable additional warnings for common issues
-    -- -Wpedantic: Warn about non-standard C++ usage (ISO C++ compliance)
-    -- -Werror: Treat warnings as errors (enforces zero-warning policy)
     add_cxxflags("-Wall", "-Wextra", "-Wpedantic", {public = true})
-
-    -- Additional useful warnings for modern C++:
-    -- -Wshadow: Warn when a variable shadows another in an outer scope
-    -- -Wconversion: Warn on implicit type conversions that may lose data
-    -- -Wold-style-cast: Warn on C-style casts (prefer static_cast, etc.)
-    -- -Wnull-dereference: Warn on potential null pointer dereferences
     add_cxxflags("-Wshadow", "-Wconversion", "-Wold-style-cast", "-Wnull-dereference", {public = true})
 
-    -- Release-specific: Enable link-time optimization (LTO) for better performance
+    -- Release-specific: Enable link-time optimization (LTO)
     if is_mode("release") then
         add_cxxflags("-flto", {public = true})
         add_ldflags("-flto", {public = true})
     end
 end
 
--- MSVC warnings (Windows with Visual Studio)
+-- MSVC warnings (Windows)
 if is_plat("windows") then
-    -- /W4: Level 4 warnings (equivalent to -Wall -Wextra)
-    -- /WX: Treat warnings as errors (equivalent to -Werror)
-    -- /permissive-: Strict conformance mode (disables non-standard extensions)
-    -- /Zc:__cplusplus: Report correct __cplusplus value (not 199711L)
     add_cxxflags("/W4", "/WX", "/permissive-", "/Zc:__cplusplus", {public = true})
-
-    -- Additional MSVC conformance flags:
-    -- /Zc:strictStrings: Disallow non-const string literal conversion
-    -- /Zc:rvalueCast: Enforce standard behavior for rvalue casts
-    -- /Zc:throwingNew: Assume operator new throws (not returns nullptr)
     add_cxxflags("/Zc:strictStrings", "/Zc:rvalueCast", "/Zc:throwingNew", {public = true})
 end
 
 -- ============================================================================
+-- Package Dependencies
+-- ============================================================================
+-- XMake has built-in package management for easy dependency handling.
+
+-- LibTorch: PyTorch C++ API for tensor operations and neural network building
+-- Provides: torch::Tensor, torch::nn modules, autograd, CUDA support
+-- Docs: https://pytorch.org/cppdocs/
+-- Install: xmake requires -y libtorch
+add_requires("libtorch", {configs = {cuda = false}})  -- Set cuda=true for GPU support
+
+-- cpp-tiktoken: BPE tokenizer compatible with GPT-2/GPT-4
+-- Provides: GptEncoding, encode(), decode()
+-- Repo: https://github.com/gh-markt/cpp-tiktoken
+--
+-- Manual installation required (not in xmake repo yet):
+-- 1. Clone: git clone https://github.com/gh-markt/cpp-tiktoken thirdparty/cpp-tiktoken
+-- 2. Build: cd thirdparty/cpp-tiktoken && mkdir build && cd build
+--           cmake .. && make && make install
+-- 3. Uncomment the add_includedirs and add_links below
+
+-- Optional development packages
+add_requires("gtest", {optional = true})  -- Google Test framework
+add_requires("spdlog", {optional = true}) -- Fast logging library
+
+-- ============================================================================
 -- Main Library Target
 -- ============================================================================
--- The library contains the core LLM implementation components.
--- We use static linking by default for simplicity and performance.
+-- The library contains the core LLM implementation components:
+-- - dataloader.hpp/cpp: GPT dataset and data loading (from ch02)
+-- - Tokenization support via cpp-tiktoken
+-- - Tensor operations via libtorch
 target("llm-core")
-    set_kind("static")  -- Static library for simplicity; change to "shared" for dynamic linking
+    set_kind("static")
 
-    -- Public headers are visible to consumers of the library
+    -- Public headers
     add_includedirs("include", {public = true})
 
-    -- Source files (using recursive glob for convenience)
-    -- Note: XMake handles file changes automatically, unlike CMake GLOB
+    -- Source files
     add_files("src/*.cpp", "src/**/*.cpp")
 
-    -- Include directory for private headers
+    -- Private headers
     add_includedirs("src", {public = false})
 
-    -- Export definitions for shared library builds (future-proofing)
+    -- Dependencies
+    add_packages("libtorch")
+
+    -- Uncomment for cpp-tiktoken (after manual installation):
+    -- add_includedirs("thirdparty/cpp-tiktoken/include", {public = true})
+    -- add_links("tiktoken")
+
+    -- Export definitions for shared library builds
     add_defines("LLM_EXPORTS", {public = true})
+
+    -- LibTorch requires exceptions and RTTI
+    if is_plat("linux", "macosx") then
+        add_cxxflags("-fexceptions", "-frtti", {public = true})
+    end
 target_end()
 
 -- ============================================================================
 -- Main Executable Target
 -- ============================================================================
--- Simple executable that uses the library for demonstration and testing.
 target("llm-cli")
     set_kind("binary")
     add_files("src/main.cpp")
-    add_deps("llm-core")  -- Link against our library
+    add_deps("llm-core")
+    add_packages("libtorch")
 
-    -- Runtime libraries for MSVC (static linking to avoid DLL dependencies)
+    -- Static CRT for MSVC
     if is_plat("windows") then
-        add_cxxflags("/MT$<s:d>", {public = true})  -- Static CRT in release, debug CRT in debug
+        add_cxxflags("/MT$<s:d>", {public = true})
     end
 target_end()
 
 -- ============================================================================
 -- Test Target
 -- ============================================================================
--- Unit tests using a minimal test framework.
--- Tests are only built when explicitly requested (xmake build tests).
 target("tests")
     set_kind("binary")
-    set_default(false)  -- Don't build by default; requires explicit `xmake build tests`
+    set_default(false)  -- Build explicitly: xmake build tests
 
     add_files("tests/*.cpp")
     add_deps("llm-core")
+    add_packages("libtorch")
     add_includedirs("include", {public = true})
 
-    -- Define test mode for conditional compilation
+    -- Use GoogleTest if available
+    if has_package("gtest") then
+        add_packages("gtest")
+    end
+
     add_defines("LLM_TEST_MODE")
 target_end()
 
 -- ============================================================================
--- Package Dependencies (Optional)
+-- Example: Loading text and creating a dataloader
 -- ============================================================================
--- XMake has built-in package management. Uncomment to add dependencies.
--- Example: GoogleTest for testing, spdlog for logging, etc.
-
--- add_requires("gtest")          -- Google Test framework
--- add_requires("spdlog")         -- Fast C++ logging library
--- add_requires("fmt")            -- Modern formatting library
--- add_requires("catch2")         -- Catch2 test framework
-
--- Then add to targets:
--- target("tests")
---     add_packages("gtest")
--- target_end()
-
--- ============================================================================
--- Build Hooks (Optional)
--- ============================================================================
--- Custom actions that run before/after builds.
--- Useful for code generation, formatting, etc.
-
--- Run clang-format before build (if available)
--- on_load(function (target)
---     os.execv("clang-format", {"-i", "src/*.cpp", "include/**/*.hpp"})
--- end)
-
--- ============================================================================
--- Custom Tasks
--- ============================================================================
--- Define custom build tasks accessible via `xmake task <name>`
-
--- task("format")
---     on_run(function ()
---         os.execv("clang-format", {"-i", "src/*.cpp", "tests/*.cpp", "include/**/*.hpp"})
---         print("Code formatted successfully")
---     end)
---     set_menu {
---         usage = "xmake task format",
---         description = "Format all source files with clang-format"
+-- Usage example (in your main.cpp):
+--
+-- #include "llm/dataloader.hpp"
+--
+-- int main() {
+--     // Load text file
+--     auto text = llm::load_text_file("the-verdict.txt");
+--
+--     // Create tokenizer
+--     auto tokenizer = llm::TikTokenTokenizer::gpt2();
+--
+--     // Create dataloader with GPT-2 style settings
+--     llm::DataLoaderConfig config{
+--         .batch_size = 8,
+--         .max_length = 256,
+--         .stride = 128,
+--         .shuffle = true,
+--         .drop_last = true
+--     };
+--
+--     auto dataloader = llm::create_dataloader(text, config, tokenizer);
+--
+--     // Iterate over batches
+--     for (auto& batch : *dataloader) {
+--         auto inputs = batch.data;    // [batch_size, max_length]
+--         auto targets = batch.target; // [batch_size, max_length]
+--         // ... training code ...
 --     }
--- task_end()
+--
+--     return 0;
+-- }
+-- ============================================================================
