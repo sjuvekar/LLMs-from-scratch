@@ -107,7 +107,7 @@ target("llm-core")
 
     -- Uncomment for cpp-tiktoken (after manual installation):
     add_includedirs("thirdparty", {public = true})
-    add_links("tiktoken")
+    -- add_links("tiktoken")
 
     -- Export definitions for shared library builds
     add_defines("LLM_EXPORTS", {public = true})

@@ -218,7 +218,7 @@ std::string load_text_file(const std::string& path) {
 int64_t tokenize_and_save(
     const std::string& input_path,
     const std::string& output_path,
-    std::shared_ptr<Tokenizer> tokenizer
+    std::shared_ptr<GptEncoding> tokenizer
 ) {
     // Load text
     auto text = load_text_file(input_path);

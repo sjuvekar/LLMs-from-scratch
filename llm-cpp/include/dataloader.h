@@ -162,7 +162,10 @@ struct DataLoaderConfig {
  */
 inline std::unique_ptr<
     torch::data::StatelessDataLoader<
-        GPTDataset, torch::data::samplers::SequentialSampler
+        torch::data::datasets::MapDataset<
+            GPTDataset,
+            torch::data::transforms::Stack<torch::data::Example<>>>,
+        torch::data::samplers::SequentialSampler
     >
 >
 create_dataloader(const std::string& txt, const DataLoaderConfig& config = {}) {
