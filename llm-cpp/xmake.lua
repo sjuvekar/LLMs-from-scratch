@@ -106,7 +106,7 @@ target("llm-core")
     add_packages("libtorch")
 
     -- Uncomment for cpp-tiktoken (after manual installation):
-    add_includedirs("thirdparty/cpp-tiktoken/include", {public = true})
+    add_includedirs("thirdparty", {public = true})
     add_links("tiktoken")
 
     -- Export definitions for shared library builds

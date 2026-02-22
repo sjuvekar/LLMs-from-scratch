@@ -1,6 +1,6 @@
 /**
  * @file dataloader.h
- * @brief C++ implementation of GPTDataset and create_dataloader_v1 from ch02
+ * @brief C++ implementation of GPTDataset and create_dataloader from ch02
  *
  * This is a direct port of the Python implementation from the book
  * "Build a Large Language Model (From Scratch)" Chapter 2.
@@ -18,6 +18,7 @@
 #include <tiktoken/encoding.h>
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -48,16 +49,20 @@ public:
      * @brief Construct a GPTDataset from text
      *
      * @param txt The raw text to tokenize and create sequences from
-     * @param gpt_encoding Shared pointer to a tiktoken encoder (GPT-2 encoding)
      * @param max_length The length of each sequence (context length)
      * @param stride The step size for the sliding window (overlap = max_length - stride)
+     * @param gpt_encoding Shared pointer to a tiktoken encoder (GPT-2 encoding)
+     * @param allowed_special allowed special characters during encoding
      *
      * @throws std::runtime_error if text is too short for max_length
      */
-    GPTDataset(const std::string& txt,
-                 std::shared_ptr<GptEncoding> gpt_encoding,
-                 int64_t max_length,
-                 int64_t stride);
+    GPTDataset(
+        const std::string& txt,
+        int64_t max_length,
+        int64_t stride,
+        std::shared_ptr<GptEncoding> gpt_encoding,
+        const std::unordered_set<std::string>& allowed_special = {}
+    );
 
     /**
      * @brief Construct a GPTDataset from token ids
@@ -69,7 +74,7 @@ public:
      * @throws std::runtime_error if text is too short for max_length
      */
     GPTDataset(
-        const std::vector<int64_t>& token_ids,
+        const std::vector<int>& token_ids,
         int64_t max_length,
         int64_t stride
     );
@@ -99,13 +104,14 @@ public:
     }
 
 private:
-    void build_dataset(const std::vector<int64_t>& token_ids);
+    void build_dataset(const std::vector<int>& token_ids);
 
     std::vector<int> token_ids_;           ///< All token IDs from the text
     std::vector<torch::Tensor> input_ids_; ///< Input sequences
     std::vector<torch::Tensor> target_ids_;///< Target sequences (shifted by 1)
     int64_t max_length_;                   ///< Context length
     int64_t stride_;                       ///< Sliding window step size
+    std::shared_ptr<GptEncoding> gpt_encoding_;
 };
 
 
@@ -140,7 +146,7 @@ struct DataLoaderConfig {
  *
  * Example usage:
  * @code
- * auto dataloader = create_dataloader_v1(text, {
+ * auto dataloader = create_dataloader(text, {
  *     .batch_size = 8,
  *     .max_length = 256,
  *     .stride = 256,  // No overlap between batches
@@ -154,51 +160,31 @@ struct DataLoaderConfig {
  * }
  * @endcode
  */
-inline std::unique_ptr<torch::data::StatelessDataLoader<
-    torch::data::datasets::MapDataset<
-        torch::data::datasets::MapDataset<
-            GPTDataset,
-            torch::data::transforms::Stack<torch::data::Example<>>
-        >,
-        torch::data::transforms::Stack<torch::data::Example<>>
-    >,
-    torch::data::samplers::RandomSampler
->>
-create_dataloader_v1(const std::string& txt, const DataLoaderConfig& config = {}) {
-
+inline std::unique_ptr<
+    torch::data::StatelessDataLoader<
+        GPTDataset, torch::data::samplers::SequentialSampler
+    >
+>
+create_dataloader(const std::string& txt, const DataLoaderConfig& config = {}) {
     // Initialize the tokenizer with GPT-2 encoding
     // This is equivalent to: tiktoken.get_encoding("gpt2")
     auto tokenizer = GptEncoding::get_encoding(config.language_model);
 
     // Create the dataset
-    auto dataset = GPTDataset(txt, tokenizer, config.max_length, config.stride)
+    auto dataset = GPTDataset(txt, config.max_length, config.stride, tokenizer)
         .map(torch::data::transforms::Stack<>());
 
     // Create the dataloader
-    // Note: libtorch uses a different API than PyTorch Python
-    // We need to manually handle the sampler and loader options
-
-    if (config.shuffle) {
-        auto sampler = torch::data::samplers::RandomSampler(dataset.size().value());
-        return torch::data::make_data_loader(
-            std::move(dataset),
-            std::move(sampler),
-            torch::data::DataLoaderOptions()
-                .batch_size(config.batch_size)
-                .workers(config.num_workers)
-                .drop_last(config.drop_last)
-        );
-    } else {
-        auto sampler = torch::data::samplers::SequentialSampler(dataset.size().value());
-        return torch::data::make_data_loader(
-            std::move(dataset),
-            std::move(sampler),
-            torch::data::DataLoaderOptions()
-                .batch_size(config.batch_size)
-                .workers(config.num_workers)
-                .drop_last(config.drop_last)
-        );
-    }
+    auto sampler = torch::data::samplers::SequentialSampler(dataset.size().value());
+    return torch::data::make_data_loader(
+        std::move(dataset),
+        std::move(sampler),
+        torch::data::DataLoaderOptions()
+            .batch_size(config.batch_size)
+            .workers(config.num_workers)
+            .enforce_ordering(!config.shuffle)
+            .drop_last(config.drop_last)
+    );
 }
 
 
@@ -235,7 +221,7 @@ inline auto create_dataloader_from_file(
     const DataLoaderConfig& config = {}
 ) {
     std::string text = read_text_file(filepath);
-    return create_dataloader_v1(text, config);
+    return create_dataloader(text, config);
 }
 
 } // namespace llm

@@ -2,18 +2,16 @@
  * @file dataloader.cpp
  * @brief Implementation of GPT dataset and data loader
  *
- * This implements the core data loading functionality for GPT training,
- * ported from Python's GPTDatasetV1 and create_dataloader_v1.
  */
 
 #include "dataloader.h"
-#include "tiktoken/encoding.h"
+#include <tiktoken/encoding.h>
 
 #include <algorithm>
 #include <iostream>
 
 namespace {
-    using ::tiktoken::GptEncoding;
+    using ::GptEncoding;
 }
 
 namespace llm {
@@ -24,50 +22,40 @@ namespace llm {
 
 GPTDataset::GPTDataset(
     const std::string& txt,
-    std::shared_ptr<GptEncoder> gpt_encoder,
     int64_t max_length,
     int64_t stride,
-    const std::vector<std::string>& allowed_special
+    std::shared_ptr<GptEncoding> gpt_encoding,
+    const std::unordered_set<std::string>& allowed_special
 )
-    : gpt_encoder_(std::move(gpt_encoder))
-    , max_length_(max_length)
+    : max_length_(max_length)
     , stride_(stride)
+    , gpt_encoding_(std::move(gpt_encoding))
 {
-    if (!gpt_encoder_) {
+    if (!gpt_encoding_) {
         // Default to GPT-2 tokenizer
-        gpt_encoder_ = GptEncoding::get_encoding(LanguageModel::R50K_BASE);
+        gpt_encoding_ = GptEncoding::get_encoding(LanguageModel::R50K_BASE);
     }
 
     // Tokenize the entire text
-    auto token_ids = gpt_encoder_->encode(txt, allowed_special);
+    auto token_ids = gpt_encoding_->encode(txt, allowed_special);
 
     // Build the dataset
     build_dataset(token_ids);
 }
 
 GPTDataset::GPTDataset(
-    const std::vector<int64_t>& token_ids,
+    const std::vector<int>& token_ids,
     int64_t max_length,
     int64_t stride
 )
-    : gpt_encoder_(nullptr)  // No tokenizer when constructed from tokens
-    , max_length_(max_length)
+    : max_length_(max_length)
     , stride_(stride)
+    , gpt_encoding_(nullptr)  // No tokenizer when constructed from tokens
 {
     build_dataset(token_ids);
 }
 
-void GPTDataset::build_dataset(const std::vector<int64_t>& token_ids) {
-    // Verify we have enough tokens
-    // Maps to Python: assert len(token_ids) > max_length
-    if (static_cast<int64_t>(token_ids.size()) <= max_length_) {
-        throw InsufficientTextError(
-            "Number of tokenized inputs (" + std::to_string(token_ids.size()) +
-            ") must at least be equal to max_length + 1 (" +
-            std::to_string(max_length_ + 1) + ")"
-        );
-    }
-
+void GPTDataset::build_dataset(const std::vector<int>& token_ids) {
     input_ids_.clear();
     target_ids_.clear();
 
@@ -90,30 +78,6 @@ void GPTDataset::build_dataset(const std::vector<int64_t>& token_ids) {
         input_ids_.push_back(torch::tensor(input_chunk, torch::kInt64));
         target_ids_.push_back(torch::tensor(target_chunk, torch::kInt64));
     }
-}
-
-std::pair<torch::Tensor, torch::Tensor> GPTDataset::get(int64_t index) const {
-    if (index < 0 || index >= size()) {
-        throw std::out_of_range(
-            "Index " + std::to_string(index) + " out of range for dataset size " +
-            std::to_string(size())
-        );
-    }
-    return {input_ids_[index], target_ids_[index]};
-}
-
-torch::Tensor GPTDataset::all_inputs() const {
-    if (input_ids_.empty()) {
-        return torch::Tensor();
-    }
-    return torch::stack(input_ids_);
-}
-
-torch::Tensor GPTDataset::all_targets() const {
-    if (target_ids_.empty()) {
-        return torch::Tensor();
-    }
-    return torch::stack(target_ids_);
 }
 
 // ============================================================================
@@ -143,7 +107,9 @@ public:
         , current_index_(0)
     {
         // Initialize indices
-        indices_.resize(dataset_->size());
+        if (dataset_->size()) {
+            indices_.resize(*dataset_->size());
+        }
         std::iota(indices_.begin(), indices_.end(), 0);
 
         if (shuffle_) {
@@ -223,59 +189,6 @@ private:
 };
 
 } // namespace detail
-
-// ============================================================================
-// Factory Functions
-// ============================================================================
-
-std::shared_ptr<torch::DataLoader<GPTDataset>> create_dataloader(
-    const std::string& txt,
-    const DataLoaderConfig& config,
-    std::shared_ptr<Tokenizer> tokenizer
-) {
-    // Create tokenizer if not provided
-    if (!tokenizer) {
-        tokenizer = TikTokenTokenizer::gpt2();
-    }
-
-    // Create dataset
-    auto dataset = std::make_shared<GPTDataset>(
-        txt,
-        tokenizer,
-        config.max_length,
-        config.stride
-    );
-
-    // Create dataloader using libtorch's built-in DataLoader
-    // Note: libtorch DataLoader syntax differs slightly from PyTorch Python
-    return std::make_shared<torch::DataLoader<GPTDataset>>(
-        *dataset,
-        torch::DataLoaderOptions()
-            .batch_size(config.batch_size)
-            .shuffle(config.shuffle)
-            .drop_last(config.drop_last)
-    );
-}
-
-std::shared_ptr<torch::DataLoader<GPTDataset>> create_dataloader(
-    const std::vector<int64_t>& token_ids,
-    const DataLoaderConfig& config
-) {
-    // Create dataset from pre-tokenized data
-    auto dataset = std::make_shared<GPTDataset>(
-        token_ids,
-        config.max_length,
-        config.stride
-    );
-
-    return std::make_shared<torch::DataLoader<GPTDataset>>(
-        *dataset,
-        torch::DataLoaderOptions()
-            .batch_size(config.batch_size)
-            .shuffle(config.shuffle)
-            .drop_last(config.drop_last)
-    );
-}
 
 // ============================================================================
 // Utility Functions
