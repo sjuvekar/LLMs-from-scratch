@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "dataset.h"
+
 #include <torch/torch.h>
 #include <tiktoken/encoding.h>
 #include <string>
@@ -25,95 +27,6 @@
 #include <memory>
 
 namespace llm {
-
-/**
- * @class GPTDataset
- * @brief Dataset class that creates overlapping input/target sequences from text
- *
- * This dataset tokenizes the entire text using a BPE tokenizer, then creates
- * overlapping chunks using a sliding window approach. Each sample consists of:
- * - input_ids: A sequence of token IDs
- * - target_ids: The same sequence shifted by one position (next-token prediction)
- *
- * Example with max_length=4, stride=1:
- *   Text: "The quick brown fox"
- *   Token IDs: [1, 2, 3, 4, 5]
- *
- *   Sample 0: input=[1, 2, 3, 4], target=[2, 3, 4, 5]
- *   Sample 1: input=[2, 3, 4, 5], target=[3, 4, 5, 6]
- *   ...
- */
-class GPTDataset : public torch::data::Dataset<GPTDataset> {
-public:
-    /**
-     * @brief Construct a GPTDataset from text
-     *
-     * @param txt The raw text to tokenize and create sequences from
-     * @param max_length The length of each sequence (context length)
-     * @param stride The step size for the sliding window (overlap = max_length - stride)
-     * @param gpt_encoding Shared pointer to a tiktoken encoder (GPT-2 encoding)
-     * @param allowed_special allowed special characters during encoding
-     *
-     * @throws std::runtime_error if text is too short for max_length
-     */
-    GPTDataset(
-        const std::string& txt,
-        int64_t max_length,
-        int64_t stride,
-        std::shared_ptr<GptEncoding> gpt_encoding,
-        const std::unordered_set<std::string>& allowed_special = {}
-    );
-
-    /**
-     * @brief Construct a GPTDataset from token ids
-     *
-     * @param token_ids Integer vector of token ids
-     * @param max_length The length of each sequence (context length)
-     * @param stride The step size for the sliding window (overlap = max_length - stride)
-     *
-     * @throws std::runtime_error if text is too short for max_length
-     */
-    GPTDataset(
-        const std::vector<int>& token_ids,
-        int64_t max_length,
-        int64_t stride
-    );
-
-    /**
-     * @brief Get a single sample from the dataset
-     *
-     * @param index The sample index
-     * @return A pair of (input_ids, target_ids) tensors
-     */
-    torch::data::Example<> get(size_t index) override {
-        return {input_ids_[index], target_ids_[index]};
-    }
-
-    /**
-     * @brief Get the number of samples in the dataset
-     */
-    torch::optional<size_t> size() const override {
-        return input_ids_.size();
-    }
-
-    /**
-     * @brief Get the raw token IDs (for debugging/inspection)
-     */
-    const std::vector<int>& get_token_ids() const {
-        return token_ids_;
-    }
-
-private:
-    void build_dataset(const std::vector<int>& token_ids);
-
-    std::vector<int> token_ids_;           ///< All token IDs from the text
-    std::vector<torch::Tensor> input_ids_; ///< Input sequences
-    std::vector<torch::Tensor> target_ids_;///< Target sequences (shifted by 1)
-    int64_t max_length_;                   ///< Context length
-    int64_t stride_;                       ///< Sliding window step size
-    std::shared_ptr<GptEncoding> gpt_encoding_;
-};
-
 
 /**
  * @brief Configuration options for the DataLoader
@@ -169,12 +82,8 @@ inline std::unique_ptr<
     >
 >
 create_dataloader(const std::string& txt, const DataLoaderConfig& config = {}) {
-    // Initialize the tokenizer with GPT-2 encoding
-    // This is equivalent to: tiktoken.get_encoding("gpt2")
-    auto tokenizer = GptEncoding::get_encoding(config.language_model);
-
     // Create the dataset
-    auto dataset = GPTDataset(txt, config.max_length, config.stride, tokenizer)
+    auto dataset = GPTDataset(txt, config.max_length, config.stride, config.language_model)
         .map(torch::data::transforms::Stack<>());
 
     // Create the dataloader

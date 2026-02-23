@@ -16,69 +16,6 @@ namespace {
 
 namespace llm {
 
-// ============================================================================
-// GPTDataset Implementation
-// ============================================================================
-
-GPTDataset::GPTDataset(
-    const std::string& txt,
-    int64_t max_length,
-    int64_t stride,
-    std::shared_ptr<GptEncoding> gpt_encoding,
-    const std::unordered_set<std::string>& allowed_special
-)
-    : max_length_(max_length)
-    , stride_(stride)
-    , gpt_encoding_(std::move(gpt_encoding))
-{
-    if (!gpt_encoding_) {
-        // Default to GPT-2 tokenizer
-        gpt_encoding_ = GptEncoding::get_encoding(LanguageModel::R50K_BASE);
-    }
-
-    // Tokenize the entire text
-    auto token_ids = gpt_encoding_->encode(txt, allowed_special);
-
-    // Build the dataset
-    build_dataset(token_ids);
-}
-
-GPTDataset::GPTDataset(
-    const std::vector<int>& token_ids,
-    int64_t max_length,
-    int64_t stride
-)
-    : max_length_(max_length)
-    , stride_(stride)
-    , gpt_encoding_(nullptr)  // No tokenizer when constructed from tokens
-{
-    build_dataset(token_ids);
-}
-
-void GPTDataset::build_dataset(const std::vector<int>& token_ids) {
-    input_ids_.clear();
-    target_ids_.clear();
-
-    for (int64_t i = 0; i < static_cast<int64_t>(token_ids.size()) - max_length_; i += stride_) {
-        // Extract input chunk: tokens[i : i + max_length]
-        std::vector<int64_t> input_chunk(
-            token_ids.begin() + i,
-            token_ids.begin() + i + max_length_
-        );
-
-        // Extract target chunk: tokens[i+1 : i + max_length + 1]
-        // Note: target is shifted by 1 position for next-token prediction
-        std::vector<int64_t> target_chunk(
-            token_ids.begin() + i + 1,
-            token_ids.begin() + i + max_length_ + 1
-        );
-
-        // Convert to tensors
-        // Maps to Python: torch.tensor(input_chunk)
-        input_ids_.push_back(torch::tensor(input_chunk, torch::kInt64));
-        target_ids_.push_back(torch::tensor(target_chunk, torch::kInt64));
-    }
-}
 
 // ============================================================================
 // Custom Dataset Loader Adapter
