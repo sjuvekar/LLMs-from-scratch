@@ -123,6 +123,7 @@ target_end()
 -- ============================================================================
 target("llm-cli")
     set_kind("binary")
+    add_files("src/main.cpp")
     add_deps("llm-core")
     add_packages("libtorch")
 
