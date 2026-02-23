@@ -32,12 +32,12 @@ namespace llm {
  * @brief Configuration options for the DataLoader
  */
 struct DataLoaderConfig {
-    int64_t batch_size = 4;       ///< Number of samples per batch
-    int64_t max_length = 256;     ///< Context length (sequence length)
-    int64_t stride = 128;         ///< Sliding window step (overlap = max_length - stride)
-    bool shuffle = true;          ///< Whether to shuffle the data
-    bool drop_last = true;        ///< Drop the last incomplete batch
-    int64_t num_workers = 0;      ///< Number of worker threads (0 = main thread)
+    unsigned long batch_size = 4;   ///< Number of samples per batch
+    unsigned long max_length = 256; ///< Context length (sequence length)
+    unsigned long stride = 128;     ///< Sliding window step (overlap = max_length - stride)
+    bool shuffle = true;            ///< Whether to shuffle the data
+    bool drop_last = true;          ///< Drop the last incomplete batch
+    unsigned long num_workers = 0;  ///< Number of worker threads (0 = main thread)
     LanguageModel language_model = LanguageModel::R50K_BASE;
 };
 
