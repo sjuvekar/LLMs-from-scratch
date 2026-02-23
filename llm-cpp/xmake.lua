@@ -110,8 +110,7 @@ target("llm-core")
     add_linkdirs("/usr/local/lib")
     add_links("tiktoken")
     add_links("pcre2-8")
-    add_files("thirdparty/tiktoken/tokenizers/*.tiktoken", {rules = "utils.bin2obj"})
-    
+
     -- Export definitions for shared library builds
     add_defines("LLM_EXPORTS", {public = true})
 
